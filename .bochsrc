@@ -1,0 +1,5 @@
+display_library: x, options="gui_debug"
+boot: a
+floppya: 1_44=build/main.bin, status=inserted
+magic_break: enabled=1
+ 
