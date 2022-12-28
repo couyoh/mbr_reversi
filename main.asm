@@ -125,8 +125,17 @@ detect_position:
     ; check whether empty piece
     mov dl, [map_enabled+bx]
     shr dl, cl
+    and dl, 1
     test dl, dl
     jnz .end ; piece is not empty
+    mov al, 1
+    shl al, cl
+    or [map_enabled+bx], al
+    mov ah, [player]
+    cmp ah, 1
+    jnz .toggle_player
+    or [map+bx], al
+    jmp .toggle_player
     ; push cx
     .loop:
         cmp cl, MAX_X
@@ -150,6 +159,9 @@ detect_position:
         shl dl, cl
         mov [map_enabled+bx], dl
 
+    .toggle_player:
+        xor ah, 1
+        mov [player], ah
     .end:
         popa
         ret
