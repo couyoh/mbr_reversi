@@ -84,6 +84,7 @@ draw:
             ; check whose piece
             mov dh, ah
             shr dh, cl
+            and dh, 1
             test dh, dh
             jz .print_USER1
             push byte USER2
