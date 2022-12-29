@@ -132,27 +132,55 @@ detect_position:
     shl al, cl
     or [map_enabled+bx], al
     mov ah, [player]
-    cmp ah, 1
-    jnz .toggle_player
-    or [map+bx], al
-    jmp .toggle_player
-    ; push cx
-    .loop:
+    or [map+bx], ah
+    mov ch, cl
+    xor dx, dx
+    .plus:
+        inc cl
         cmp cl, MAX_X
+        jge .end
+        mov dl, [map_enabled+bx]
+        shr dl, cl
+        and dl, 1
+        test dl, dl
+        jz .change_piece
+        mov dl, [map+bx]
+        shr dl, cl
+        and dl, 1
+        cmp dl, [player]
+        jz .change_piece
+        inc dh ; number of same pieces (+x direction)
+        inc cl
+        jmp .plus
+    .change_piece:
+        xchg bx, bx
+        sub cl, 2
+        add dh, cl
+        .loop:
+        cmp cl, dh
+        jz .minus
+        mov al, 1
+        shl al, cl
+        xor [map+bx], al
+        inc cl
+        jmp .loop
+    .minus:
+        jmp .end ; TODO: remove
+        cmp ch, MAX_X
         jz .end
         mov dl, [map+bx]
         shr dl, cl
-
         cmp dl, player
-        jz .check_enabled
-        jmp .loop
+        jz .toggle_player
+        ;TODO
+        inc ch
+        jmp .minus
     .check_enabled:
         mov dl, [map_enabled+bx]
         shr dl, cl
         test dl, dl
         jz .end
         inc cx
-        ; pop cx
         jmp .put_piece
     .put_piece:
         mov dl, 1
