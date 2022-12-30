@@ -9,6 +9,35 @@ org 0x7c00
 %define NEWLINE_0D 0x0d
 %define NEWLINE_0A 0x0a
 
+; If I use subroutine call instead of macro, compiled code is bigger size.
+%macro get_nbit 2
+    mov %1, %2
+    shr %1, cl
+    and %1, 1
+%endmacro
+; FYR: subroutine call
+; get_nbit:
+;     mov bp, sp
+;     xor ax, ax
+;     push cx
+;     mov cx, [bp + 4]
+;     mov ax, [bp + 2]
+;     shr al, cl
+;     and al, 1
+;     pop cx
+;     ret 4
+%macro set_nbit 2
+    mov al, 1
+    shl al, %2
+    or %1, al
+%endmacro
+%macro unset_nbit 2
+    mov al, 1
+    shl al, %2
+    not al
+    and %1, al
+%endmacro
+
        ; hgfedcba
 map db 0b00000000, ; 1
     db 0b00000000, ; 2
@@ -75,16 +104,12 @@ draw:
             cmp cl, MAX_Y
             jz .end_y
             ; check whether the piece is placed
-            mov dl, al
-            shr dl, cl
-            and dl, 1
+            get_nbit dl, al
             test dl, dl
             jz .print_empty
 
             ; check whose piece
-            mov dh, ah
-            shr dh, cl
-            and dh, 1
+            get_nbit dh, ah
             test dh, dh
             jz .print_USER1
             push byte USER2
@@ -114,82 +139,89 @@ detect_position:
     pusha
     xor bx, bx
     xor cx, cx
-    call wait_key ; x
-    mov cl, al ; must be between a and h
+    call wait_key ; x must be between a and h
+    mov cl, al
     sub cl, 'a'
-    call wait_key ; y
-    mov bl, al ; must be between 1 and 8
+    call wait_key ; y must be between 1 and 8
+    mov bl, al
     sub bl, '1'
     call print_0d0a
 
     ; check whether empty piece
-    mov dl, [map_enabled+bx]
-    shr dl, cl
-    and dl, 1
+    get_nbit dl, [map_enabled+bx]
     test dl, dl
     jnz .end ; piece is not empty
-    mov al, 1
-    shl al, cl
-    or [map_enabled+bx], al
-    mov ah, [player]
-    or [map+bx], ah
-    mov ch, cl
+    push cx
     xor dx, dx
     .plus:
         inc cl
         cmp cl, MAX_X
-        jge .end
-        mov dl, [map_enabled+bx]
-        shr dl, cl
-        and dl, 1
-        test dl, dl
-        jz .change_piece
-        mov dl, [map+bx]
-        shr dl, cl
-        and dl, 1
-        cmp dl, [player]
-        jz .change_piece
-        inc dh ; number of same pieces (+x direction)
-        inc cl
+        jge .minus
+        get_nbit al, [map_enabled+bx]
+        test al, al
+        jz .minus_init
+        get_nbit al, [map+bx]
+        cmp al, [player]
+        jz .minus_init
+        inc dl ; number of same pieces (+x direction)
         jmp .plus
-    .change_piece:
-        xchg bx, bx
-        sub cl, 2
-        add dh, cl
-        .loop:
-        cmp cl, dh
-        jz .minus
-        mov al, 1
-        shl al, cl
-        xor [map+bx], al
-        inc cl
-        jmp .loop
+    .minus_init:
+        pop cx
+        push cx
     .minus:
-        jmp .end ; TODO: remove
-        cmp ch, MAX_X
-        jz .end
-        mov dl, [map+bx]
-        shr dl, cl
-        cmp dl, player
-        jz .toggle_player
-        ;TODO
-        inc ch
+        dec cl
+        cmp cl, 0 ; I wouldn't use "test cl, cl" because cl might be negative.
+        jle .change_piece
+        get_nbit al, [map_enabled+bx]
+        test al, al
+        jz .change_piece
+        get_nbit al, [map+bx]
+        cmp al, [player]
+        jz .minus_init
+        inc dh ; number of same pieces (-x direction)
         jmp .minus
-    .check_enabled:
-        mov dl, [map_enabled+bx]
-        shr dl, cl
-        test dl, dl
+    .change_piece:
+        ; if no same pieces, don't put piece
+        test dx, dx
         jz .end
-        inc cx
-        jmp .put_piece
-    .put_piece:
-        mov dl, 1
-        shl dl, cl
-        mov [map_enabled+bx], dl
-
-    .toggle_player:
-        xor ah, 1
-        mov [player], ah
+        pop cx
+        push cx
+        mov ch, cl
+        add dl, cl
+        add dh, cl
+        .positive_loop:
+            cmp cl, dl
+            jz .negative
+            mov al, 1
+            shl al, cl
+            xor [map+bx], al
+            inc cl
+            jmp .positive_loop
+        .negative:
+            pop cx
+            push cx
+        .negative_loop:
+            cmp cl, dh
+            jle .enable_peace
+            mov al, 1
+            shl al, cl
+            xor [map+bx], al
+            dec cl
+            jmp .negative_loop
+    .enable_peace:
+        ; put piece
+        pop cx
+        set_nbit [map_enabled+bx], cl
+        mov dl, [player]
+        test dl, dl
+        jz .enable_player1
+        set_nbit [map+bx], cl
+        jmp .toggle_player
+        .enable_player1:
+            unset_nbit [map+bx], cl
+        .toggle_player:
+            xor dl, 1
+            mov [player], dl
     .end:
         popa
         ret
@@ -211,4 +243,4 @@ loop:
 player db 0
 
 times 510-($-$$) db 0
-db 0x55, 0xaa 
+db 0x55, 0xaa
