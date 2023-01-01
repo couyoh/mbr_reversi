@@ -41,6 +41,11 @@ init:
     int 0x10
     jmp loop
 
+loop:
+    call draw
+    call detect_position
+    jmp loop
+
 putchar:
     mov bp, sp
     pusha
@@ -50,6 +55,100 @@ putchar:
     int 0x10
     popa
     ret 2
+
+reverse_bit:
+    mov bp, sp
+    push bx
+    push cx
+    xor ax, ax
+    xor cx, cx
+    .loop:
+        cmp cx, MAX_X
+        jz .end
+        bt [bp + 2], cx
+        jnc .finally
+        mov bx, MAX_X-1
+        sub bx, cx
+        bts ax, bx
+    .finally:
+        inc cx
+        jmp .loop
+    .end:
+        pop cx
+        pop bx
+        ret 2
+
+x_to_y:
+    mov bp, sp
+    push bx
+    push cx
+    xor ax, ax
+    mov cx, [bp + 4] ; column
+    mov si, [bp + 2] ; addr_first
+    .loop:
+        cmp bx, MAX_Y
+        jz .end
+        bt [bx], cx
+        jnc .finally
+        bts ax, cx
+    .finally:
+        inc si
+        inc bx
+        jmp .loop
+    .end:
+        pop cx
+        pop bx
+        ret 4
+
+check_piece:
+    mov bp, sp
+    push cx
+    mov cx, [bp + 6] ; base
+    xor ax, ax
+    ; Maybe I can use BSF/BSR instruction.
+    .loop:
+        inc cl
+        cmp cl, MAX_X
+        jge .clear
+        bt [bp + 2], cx ; map_enabled
+        jnc .clear
+        bt [bp + 4], cx ; map
+        get_cf ah
+        cmp ah, [player]
+        jz .end
+        inc al ; number of same pieces (+x direction)
+        jmp .loop
+    .clear:
+        xor al, al
+    .end:
+        xor ah, ah
+        pop cx
+        ret 6
+
+change_piece:
+    ; To reduce code, it doesn't use calling convention.
+    ; mov bp, sp
+    ; push cx
+    ; mov cx, [bp + 2]
+    .loop:
+        cmp ch, cl
+        movzx ax, ch
+        jg .end
+        cmp byte [player], 0
+        jnz .set_player2
+        .set_player1:
+            btr [map+bx], ax
+            jmp .next
+        .set_player2:
+            bts [map+bx], ax
+        .next:
+            bts [map_enabled+bx], ax
+            inc ch
+            jmp .loop
+    .end:
+        ; pop cx
+        ; ret 2
+        ret
 
 print_0d0a:
     push NEWLINE_0D
@@ -109,7 +208,6 @@ draw:
         ret
 
 detect_position:
-    pusha
     call wait_key ; x must be between a and h
     movzx cx, al
     sub cl, 'a'
@@ -117,97 +215,21 @@ detect_position:
     movzx bx, al
     sub bl, '1'
     call print_0d0a
-
-    push cx
-    ; check whether empty piece
-    bt [map_enabled+bx], cx
-    jc .end ; piece is not empty
-    xor dx, dx
-    ; Maybe I can use BSF/BSR instruction.
-    .plus:
-        inc cl
-        cmp cl, MAX_X
-        jge .end
+    .check_empty:
         bt [map_enabled+bx], cx
-        jnc .clear_dl
-        bt [map+bx], cx
-        get_cf al
-        cmp al, [player]
-        jz .minus_init
-        inc dl ; number of same pieces (+x direction)
-        jmp .plus
-    .clear_dl:
-        xor dl, dl
-    .minus_init:
-        pop cx
-        push cx
-    .minus:
-        dec cl
-        cmp cl, 0 ; I wouldn't use "test cl, cl" because cl might be negative.
-        jle .end
-        bt [map_enabled+bx], cx
-        jnc .clear_dh
-        bt [map+bx], cx
-        get_cf al
-        cmp al, [player]
-        jz .change
-        inc dh ; number of same pieces (-x direction)
-        jmp .minus
-    .clear_dh:
-        xor dh, dh
-    .change:
-        ; if no same pieces, don't put piece
-        test dx, dx
+        jc .end
+    call count_piece
+    mov cx, dx
+    .has_change:
+        cmp ch, cl
         jz .end
-        pop cx
-        push cx
-        add dl, cl
-        sub dh, cl
-        neg dh
-        .positive_loop:
-            cmp cl, dl
-            jg .negative
-            cmp byte [player], 0
-            jz .set_player1
-            bts [map+bx], cx
-            jmp .finally
-            .set_player1:
-                btr [map+bx], cx
-            .finally:
-                inc cl
-                jmp .positive_loop
-        .negative:
-            pop cx
-            push cx
-        .negative_loop:
-            cmp cl, dh
-            jl .put
-            cmp byte [player], 0
-            jz .set_player1_
-            bts [map+bx], cx
-            jmp .finally_
-            .set_player1_:
-                btr [map+bx], cx
-            .finally_:
-            dec cl
-            jmp .negative_loop
-    .put:
-        pop cx
-        push cx
-        bts [map_enabled+bx], cx
+    ; push cx
+    call change_piece
+    .toggle_player:
         mov dl, [player]
-        test dl, dl
-        jz .enable_player1
-        bts [map+bx], cx
-        jmp .toggle_player
-        .enable_player1:
-            btr [map+bx], cx
-        .toggle_player:
-            xor dl, 1
-            mov [player], dl
+        xor dl, 1
+        mov [player], dl
     .end:
-        pop cx
-        popa
         ret
 
 wait_key:
@@ -219,10 +241,31 @@ wait_key:
     pop ax
     ret
 
-loop:
-    call draw
-    call detect_position
-    jmp loop
+count_piece:
+    push cx
+    push word [map + bx]
+    push word [map_enabled + bx]
+    call check_piece
+    mov dl, al
+
+    mov ax, cx
+    sub ax, MAX_X
+    not ax
+    push ax
+    push word [map + bx]
+    call reverse_bit
+    push ax
+    push word [map_enabled + bx]
+    call reverse_bit
+    push ax
+    call check_piece
+    mov dh, al
+
+    add dl, cl
+    sub dh, cl
+    neg dh
+    ret
+
 
 times 510-($-$$) db 0
 db 0x55, 0xaa
