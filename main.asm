@@ -79,26 +79,46 @@ reverse_bit:
         ret 2
 
 x_to_y:
-    mov bp, sp
-    push bx
-    push cx
-    xor ax, ax
-    mov cx, [bp + 4] ; column
-    mov si, [bp + 2] ; addr_first
-    .loop:
-        cmp bx, MAX_Y
+    ; mov bp, sp
+    pusha
+    ; mov si, [bp + 2]
+    xor cx, cx
+    .outer_loop:
+        cmp cx, MAX_Y
         jz .end
-        bt [bx], cx
-        jnc .finally
-        bts ax, cx
-    .finally:
-        inc si
-        inc bx
-        jmp .loop
+
+        xor dx, dx
+        xor di, di
+        .inner_loop:
+            cmp dx, MAX_X
+            jz .outer_next
+            bt [si], dx
+            jnc .finally
+            bts di, dx
+            .finally:
+                inc dx
+                jmp .inner_loop
+
+        .outer_next:
+            push di
+            inc cx
+            inc si
+            jmp .outer_loop
     .end:
-        pop cx
-        pop bx
-        ret 4
+        dec si
+        xor cx, cx
+        .loop:
+            cmp cx, MAX_Y
+            jb .ret
+            pop ax
+            mov [si], al
+            dec si
+            inc cx
+            jmp .loop
+        .ret:
+            popa
+            ; ret 2
+            ret
 
 check_piece:
     mov bp, sp
@@ -215,30 +235,50 @@ detect_position:
     movzx bx, al
     sub bl, '1'
     call print_0d0a
-    .check_empty:
-        bt [map_enabled+bx], cx
-        jc .end
+    call detect_loop
+    call draw ; For debug
+    call to_xy
+    call draw ; For debug
+    xchg bx, bx
+    call detect_loop
+    call to_xy
+    ret
+
+to_xy:
+    lea si, [map_enabled]
+    call x_to_y
+    lea si, [map]
+    call x_to_y
+    ret
+
+detect_loop:
+    ; If input coord is not empty, do nothing.
+    bt [map_enabled+bx], cx
+    jc .end
+
     call count_piece
     mov cx, dx
-    .has_change:
-        cmp ch, cl
-        jz .end
+
+    ; If no same piece, do nothing.
+    cmp ch, cl
+    jz .end
+
     ; push cx
     call change_piece
-    .toggle_player:
-        mov dl, [player]
-        xor dl, 1
-        mov [player], dl
+
+    ; toggle player
+    mov dl, [player]
+    xor dl, 1
+    mov [player], dl
+
     .end:
         ret
 
 wait_key:
     xor ax, ax
     int 0x16
-    push ax ; for pop
     push ax ; for putchar's argument
     call putchar
-    pop ax
     ret
 
 count_piece:
