@@ -83,36 +83,37 @@ x_to_y:
     pusha
     ; mov si, [bp + 2]
     xor cx, cx
+    mov ax, si
     .outer_loop:
-        cmp cx, MAX_Y
+        cmp cx, MAX_X
         jz .end
 
         xor dx, dx
         xor di, di
         .inner_loop:
-            cmp dx, MAX_X
+            cmp dx, MAX_Y
             jz .outer_next
-            bt [si], dx
+            bt [si], cx
             jnc .finally
             bts di, dx
             .finally:
                 inc dx
+                inc si
                 jmp .inner_loop
 
         .outer_next:
+            mov si, ax
             push di
             inc cx
-            inc si
             jmp .outer_loop
     .end:
-        dec si
         xor cx, cx
         .loop:
             cmp cx, MAX_Y
-            jb .ret
+            jz .ret
             pop ax
             mov [si], al
-            dec si
+            inc si
             inc cx
             jmp .loop
         .ret:
@@ -236,12 +237,12 @@ detect_position:
     sub bl, '1'
     call print_0d0a
     call detect_loop
-    call draw ; For debug
-    call to_xy
-    call draw ; For debug
-    xchg bx, bx
+    ; call draw ; For debug
+    call to_xy ; 90
     call detect_loop
-    call to_xy
+    call to_xy ; 180
+    call to_xy ; 240
+    call to_xy ; 360
     ret
 
 to_xy:
@@ -249,6 +250,9 @@ to_xy:
     call x_to_y
     lea si, [map]
     call x_to_y
+    push cx
+    mov cx, bx
+    pop bx
     ret
 
 detect_loop:
