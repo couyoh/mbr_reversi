@@ -121,6 +121,38 @@ x_to_y:
             ; ret 2
             ret
 
+askew:
+    ; si: First address
+    ; bx: y
+    ; cx: x
+    mov bp, sp
+    pusha
+    ; sub sp, 2
+    xor di, di
+    .find_start:
+        dec bx
+        dec cx
+        cmp bx, 0
+        cmp cx, 0
+        jle .loop ; jump if bx OR cx is zero.
+        jmp .find_start
+    .loop:
+        cmp cx, MAX_Y
+        jz .end
+        bt [si+bx], cx
+        jnc .finally
+        bts di, cx
+        .finally:
+            inc bx
+            inc cx
+            jmp .loop
+    .end:
+        mov [bp + 2], di
+        ; add sp, 2
+        popa
+        mov ax, [bp + 2]
+        ret
+
 check_piece:
     mov bp, sp
     push cx
@@ -181,15 +213,15 @@ print_0d0a:
 draw:
     xor dx, dx
     xor bx, bx
-    .title:
-        cmp dx, MAX_X
-        jz .x
-        mov ax, dx
-        add ax, 'a'
-        push ax
-        call putchar
-        inc dx
-        jmp .title
+    ; .title:
+    ;     cmp dx, MAX_X
+    ;     jz .x
+    ;     mov ax, dx
+    ;     add ax, 'a'
+    ;     push ax
+    ;     call putchar
+    ;     inc dx
+    ;     jmp .title
     .x:
         call print_0d0a
         cmp bx, MAX_X
@@ -242,6 +274,20 @@ detect_position:
     call to_xy ; 180
     call to_xy ; 240
     call to_xy ; 360
+    ; bx, cx has already been defined at to_xy subroutine.
+    lea si, [map]
+    call askew
+    push word [map + bx]
+    push word [map_enabled + bx]
+    push bx
+    mov [map + bx], ax
+    lea si, [map_enabled]
+    call askew
+    mov [map_enabled + bx], ax
+    call detect_loop
+    pop bx
+    pop word [map_enabled + bx]
+    pop word [map + bx]
     ret
 
 to_xy:
