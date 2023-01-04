@@ -237,7 +237,6 @@ detect_position:
     sub bl, '1'
     call print_0d0a
     call detect_loop
-    ; call draw ; For debug
     call to_xy ; 90
     call detect_loop
     call to_xy ; 180
@@ -253,6 +252,9 @@ to_xy:
     push cx
     mov cx, bx
     pop bx
+    sub bx, MAX_X-1
+    neg bx
+    movzx bx, bl
     ret
 
 detect_loop:
@@ -281,7 +283,7 @@ detect_loop:
 wait_key:
     xor ax, ax
     int 0x16
-    push ax ; for putchar's argument
+    push ax
     call putchar
     ret
 
