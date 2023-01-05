@@ -14,6 +14,11 @@ org 0x7c00
     and %1, 1
 %endmacro
 
+%macro abs 2
+    sub %1, %2
+    neg %1
+%endmacro
+
 player db 0
 
        ; hgfedcba
@@ -55,28 +60,6 @@ putchar:
     int 0x10
     popa
     ret 2
-
-reverse_bit:
-    mov bp, sp
-    push bx
-    push cx
-    xor ax, ax
-    xor cx, cx
-    .loop:
-        cmp cx, MAX_X
-        jz .end
-        bt [bp + 2], cx
-        jnc .finally
-        mov bx, MAX_X-1
-        sub bx, cx
-        bts ax, bx
-    .finally:
-        inc cx
-        jmp .loop
-    .end:
-        pop cx
-        pop bx
-        ret 2
 
 x_to_y:
     ; mov bp, sp
@@ -127,7 +110,6 @@ askew:
     ; cx: x
     mov bp, sp
     pusha
-    ; sub sp, 2
     xor di, di
     .find_start:
         dec bx
@@ -147,60 +129,43 @@ askew:
             inc cx
             jmp .loop
     .end:
-        mov [bp + 2], di
-        ; add sp, 2
+        mov [bp - 2], di
         popa
-        mov ax, [bp + 2]
+        mov ax, [bp - 2]
         ret
 
 check_piece:
-    mov bp, sp
     push cx
-    mov cx, [bp + 6] ; base
+    push dx
     xor ax, ax
-    ; Maybe I can use BSF/BSR instruction.
-    .loop:
+    push cx
+    .dec_loop:
+        mov ah, cl
+        dec cl
+        cmp cl, 0
+        jl .loop_init
+        bt [si], cx
+        jnc .loop_init
+        bt [di], cx
+        get_cf dx
+        cmp dx, [player]
+        jnz .dec_loop
+    .loop_init:
+        pop cx
+    .inc_loop:
+        mov al, cl
         inc cl
         cmp cl, MAX_X
-        jge .clear
-        bt [bp + 2], cx ; map_enabled
-        jnc .clear
-        bt [bp + 4], cx ; map
-        get_cf ah
-        cmp ah, [player]
-        jz .end
-        inc al ; number of same pieces (+x direction)
-        jmp .loop
-    .clear:
-        xor al, al
+        jge .end
+        bt [si], cx
+        jnc .end
+        bt [di], cx
+        get_cf dx
+        cmp dx, [player]
+        jnz .inc_loop
     .end:
-        xor ah, ah
+        pop dx
         pop cx
-        ret 6
-
-change_piece:
-    ; To reduce code, it doesn't use calling convention.
-    ; mov bp, sp
-    ; push cx
-    ; mov cx, [bp + 2]
-    .loop:
-        cmp ch, cl
-        movzx ax, ch
-        jg .end
-        cmp byte [player], 0
-        jnz .set_player2
-        .set_player1:
-            btr [map+bx], ax
-            jmp .next
-        .set_player2:
-            bts [map+bx], ax
-        .next:
-            bts [map_enabled+bx], ax
-            inc ch
-            jmp .loop
-    .end:
-        ; pop cx
-        ; ret 2
         ret
 
 print_0d0a:
@@ -213,15 +178,15 @@ print_0d0a:
 draw:
     xor dx, dx
     xor bx, bx
-    ; .title:
-    ;     cmp dx, MAX_X
-    ;     jz .x
-    ;     mov ax, dx
-    ;     add ax, 'a'
-    ;     push ax
-    ;     call putchar
-    ;     inc dx
-    ;     jmp .title
+    .title:
+        cmp dx, MAX_X
+        jz .x
+        mov ax, dx
+        add ax, 'a'
+        push ax
+        call putchar
+        inc dx
+        jmp .title
     .x:
         call print_0d0a
         cmp bx, MAX_X
@@ -268,62 +233,99 @@ detect_position:
     movzx bx, al
     sub bl, '1'
     call print_0d0a
+
+    ; If input coord is not empty, do nothing.
+    bt [map_enabled+bx], cx
+    jc .end
+
     call detect_loop
+    push ax
     call to_xy ; 90
     call detect_loop
+    pop bx
+    test ax, bx ; check whether are ax AND bx zero
+    jz .end
+    xor byte [player], 1 ; toggle player
+
+    .end:
     call to_xy ; 180
     call to_xy ; 240
     call to_xy ; 360
     ; bx, cx has already been defined at to_xy subroutine.
-    lea si, [map]
-    call askew
-    push word [map + bx]
-    push word [map_enabled + bx]
-    push bx
-    mov [map + bx], ax
-    lea si, [map_enabled]
-    call askew
-    mov [map_enabled + bx], ax
-    call detect_loop
-    pop bx
-    pop word [map_enabled + bx]
-    pop word [map + bx]
-    ret
+    ; lea si, [map]
+    ; call askew
+    ; push ax
+    ; lea si, [map_enabled]
+    ; call askew
+    ; mov si, ax
+    ; pop di
+    ; call check_piece
+    ; xchg bx, bx
+    ; cmp ah, al
+    ; jz .end
+    ; mov cx, ax
+    ; .loop:
+    ;     cmp ch, cl
+    ;     movzx ax, ch
+    ;     jg .end
+    ;     cmp byte [player], 0
+    ;     mov bx, ax
+    ;     jz .set_player2
+    ;     .set_player1:
+    ;         btr [map+bx], ax
+    ;         jmp .next
+    ;     .set_player2:
+    ;         bts [map+bx], ax
+    ;     .next:
+    ;         bts [map_enabled+bx], ax
+    ;         inc ch
+    ;         jmp .loop
+    ; .end:
+        ret
 
 to_xy:
     lea si, [map_enabled]
     call x_to_y
     lea si, [map]
     call x_to_y
-    push cx
-    mov cx, bx
-    pop bx
-    sub bx, MAX_X-1
-    neg bx
+    xchg cx, bx
+    abs bx, MAX_X-1
     movzx bx, bl
     ret
 
 detect_loop:
-    ; If input coord is not empty, do nothing.
-    bt [map_enabled+bx], cx
-    jc .end
-
-    call count_piece
-    mov cx, dx
+    lea si, [map_enabled+bx]
+    lea di, [map+bx]
+    xchg bx, bx
+    call check_piece
 
     ; If no same piece, do nothing.
-    cmp ch, cl
+    cmp ah, al
     jz .end
 
-    ; push cx
-    call change_piece
+    mov cx, ax
+    .loop:
+        cmp ch, cl
+        movzx ax, ch
+        jg .toggle_player
+        cmp byte [player], 0
+        jnz .set_player2
+        .set_player1:
+            btr [map+bx], ax
+            jmp .next
+        .set_player2:
+            bts [map+bx], ax
+        .next:
+            bts [map_enabled+bx], ax
+            inc ch
+            jmp .loop
 
-    ; toggle player
-    mov dl, [player]
-    xor dl, 1
-    mov [player], dl
+    .toggle_player:
+        xor ax, ax
+        ret
 
     .end:
+        mov ax, 1
         ret
 
 wait_key:
@@ -332,32 +334,6 @@ wait_key:
     push ax
     call putchar
     ret
-
-count_piece:
-    push cx
-    push word [map + bx]
-    push word [map_enabled + bx]
-    call check_piece
-    mov dl, al
-
-    mov ax, cx
-    sub ax, MAX_X
-    not ax
-    push ax
-    push word [map + bx]
-    call reverse_bit
-    push ax
-    push word [map_enabled + bx]
-    call reverse_bit
-    push ax
-    call check_piece
-    mov dh, al
-
-    add dl, cl
-    sub dh, cl
-    neg dh
-    ret
-
 
 times 510-($-$$) db 0
 db 0x55, 0xaa
