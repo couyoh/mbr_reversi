@@ -61,48 +61,57 @@ putchar:
     popa
     ret 2
 
-x_to_y:
-    ; mov bp, sp
-    pusha
-    ; mov si, [bp + 2]
-    xor cx, cx
-    mov ax, si
-    .outer_loop:
-        cmp cx, MAX_X
-        jz .end
+rotate90:
+    lea si, [map_enabled]
+    call ._rotate90
+    lea si, [map]
+    call ._rotate90
+    xchg cx, bx
+    abs bx, MAX_X-1
+    ret
 
-        xor dx, dx
-        xor di, di
-        .inner_loop:
-            cmp dx, MAX_Y
-            jz .outer_next
-            bt [si], cx
-            jnc .finally
-            bts di, dx
-            .finally:
-                inc dx
-                inc si
-                jmp .inner_loop
-
-        .outer_next:
-            mov si, ax
-            push di
-            inc cx
-            jmp .outer_loop
-    .end:
+    ._rotate90:
+        ; mov bp, sp
+        pusha
+        ; mov si, [bp + 2]
         xor cx, cx
-        .loop:
-            cmp cx, MAX_Y
-            jz .ret
-            pop ax
-            mov [si], al
-            inc si
-            inc cx
-            jmp .loop
-        .ret:
-            popa
-            ; ret 2
-            ret
+        mov ax, si
+        .outer_loop:
+            cmp cx, MAX_X
+            jz .end
+
+            xor dx, dx
+            xor di, di
+            .inner_loop:
+                cmp dx, MAX_Y
+                jz .outer_next
+                bt [si], cx
+                jnc .finally
+                bts di, dx
+                .finally:
+                    inc dx
+                    inc si
+                    jmp .inner_loop
+
+            .outer_next:
+                mov si, ax
+                push di
+                inc cx
+                jmp .outer_loop
+        .end:
+            xor cx, cx
+            .loop:
+                cmp cx, MAX_Y
+                jz .ret
+                pop ax
+                mov [si], al
+                inc si
+                inc cx
+                jmp .loop
+            .ret:
+                popa
+                ; ret 2
+                ret
 
 askew:
     ; si: First address
@@ -134,39 +143,6 @@ askew:
         mov ax, [bp - 2]
         ret
 
-check_piece:
-    push cx
-    push dx
-    xor ax, ax
-    push cx
-    .dec_loop:
-        mov ah, cl
-        dec cl
-        cmp cl, 0
-        jl .loop_init
-        bt [si], cx
-        jnc .loop_init
-        bt [di], cx
-        get_cf dx
-        cmp dx, [player]
-        jnz .dec_loop
-    .loop_init:
-        pop cx
-    .inc_loop:
-        mov al, cl
-        inc cl
-        cmp cl, MAX_X
-        jge .end
-        bt [si], cx
-        jnc .end
-        bt [di], cx
-        get_cf dx
-        cmp dx, [player]
-        jnz .inc_loop
-    .end:
-        pop dx
-        pop cx
-        ret
 
 print_0d0a:
     push NEWLINE_0D
@@ -238,20 +214,19 @@ detect_position:
     bt [map_enabled+bx], cx
     jc .end
 
-    call detect_loop
+    call change_piece
     push ax
-    call to_xy ; 90
-    call detect_loop
-    pop bx
-    test ax, bx ; check whether are ax AND bx zero
-    jz .end
-    xor byte [player], 1 ; toggle player
+    call rotate90 ; 90
+    call change_piece
+    cmp al, ah
+    pop bx ; must be POPped before jump, or else it caused stack corruption.
+    jz .toggle_player
+    cmp bl, bh
+    jnz .restore
+    .toggle_player:
+        xor byte [player], 1 ; toggle player
 
-    .end:
-    call to_xy ; 180
-    call to_xy ; 240
-    call to_xy ; 360
-    ; bx, cx has already been defined at to_xy subroutine.
+    ; bx, cx has already been defined at rotate90 subroutine.
     ; lea si, [map]
     ; call askew
     ; push ax
@@ -259,7 +234,7 @@ detect_position:
     ; call askew
     ; mov si, ax
     ; pop di
-    ; call check_piece
+    ; call count_piece
     ; xchg bx, bx
     ; cmp ah, al
     ; jz .end
@@ -280,34 +255,27 @@ detect_position:
     ;         bts [map_enabled+bx], ax
     ;         inc ch
     ;         jmp .loop
-    ; .end:
+    .restore:
+        call rotate90 ; 180
+        call rotate90 ; 240
+        call rotate90 ; 360
+    .end:
         ret
 
-to_xy:
-    lea si, [map_enabled]
-    call x_to_y
-    lea si, [map]
-    call x_to_y
-    xchg cx, bx
-    abs bx, MAX_X-1
-    movzx bx, bl
-    ret
-
-detect_loop:
+change_piece:
     lea si, [map_enabled+bx]
     lea di, [map+bx]
-    xchg bx, bx
-    call check_piece
+    call count_piece
 
     ; If no same piece, do nothing.
     cmp ah, al
-    jz .end
+    jz .do_nothing
 
     mov cx, ax
     .loop:
         cmp ch, cl
         movzx ax, ch
-        jg .toggle_player
+        jg .changed
         cmp byte [player], 0
         jnz .set_player2
         .set_player1:
@@ -320,12 +288,49 @@ detect_loop:
             inc ch
             jmp .loop
 
-    .toggle_player:
+    .changed:
+        ; This subroutine would be called multiple times.
+        ; If toggling player here, it may be overwritten when called again.
         xor ax, ax
         ret
 
-    .end:
+    .do_nothing:
         mov ax, 1
+        ret
+
+count_piece:
+    ; cx: x (0-7)
+    push cx
+    push dx
+    xor ax, ax
+    push cx
+    .dec_loop:
+        mov ah, cl
+        dec cl
+        cmp cl, 0
+        jl .restore_cx
+        bt [si], cx
+        jnc .restore_cx
+        bt [di], cx
+        get_cf dx
+        cmp dx, [player]
+        jnz .dec_loop
+    .restore_cx:
+        pop cx
+    .inc_loop:
+        mov al, cl
+        inc cl
+        cmp cl, MAX_X
+        jge .end
+        bt [si], cx
+        jnc .end
+        bt [di], cx
+        get_cf dx
+        cmp dx, [player]
+        jnz .inc_loop
+    .end:
+        pop dx
+        pop cx
         ret
 
 wait_key:
