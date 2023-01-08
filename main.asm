@@ -113,6 +113,19 @@ rotate90:
                 ; ret 2
                 ret
 
+get_askew:
+    cmp cx, MAX_Y
+    jge .end
+    bt [si+bx], cx
+    jnc .finally
+    bts di, cx
+    .finally:
+        inc bx
+        inc cx
+        jmp get_askew
+    .end:
+        ret
+
 askew:
     ; si: First address
     ; bx: y
@@ -124,24 +137,24 @@ askew:
         dec bx
         dec cx
         cmp bx, 0
+        jz .loop
+        jl .set_zero_bx
         cmp cx, 0
-        jle .loop ; jump if bx OR cx is zero.
+        jz .loop
+        jl .set_zero_cx
         jmp .find_start
+    .set_zero_bx:
+        xor bx, bx
+        jmp .loop
+    .set_zero_cx:
+        xor cx, cx
     .loop:
-        cmp cx, MAX_Y
-        jz .end
-        bt [si+bx], cx
-        jnc .finally
-        bts di, cx
-        .finally:
-            inc bx
-            inc cx
-            jmp .loop
+        call [bp + 2]
     .end:
         mov [bp - 2], di
         popa
         mov ax, [bp - 2]
-        ret
+        ret 2
 
 
 print_0d0a:
@@ -154,15 +167,15 @@ print_0d0a:
 draw:
     xor dx, dx
     xor bx, bx
-    .title:
-        cmp dx, MAX_X
-        jz .x
-        mov ax, dx
-        add ax, 'a'
-        push ax
-        call putchar
-        inc dx
-        jmp .title
+    ; .title:
+    ;     cmp dx, MAX_X
+    ;     jz .x
+    ;     mov ax, dx
+    ;     add ax, 'a'
+    ;     push ax
+    ;     call putchar
+    ;     inc dx
+    ;     jmp .title
     .x:
         call print_0d0a
         cmp bx, MAX_X
@@ -182,13 +195,12 @@ draw:
             jmp .putchar
             .print_USER1:
                 push byte USER1
-            .putchar:
-                call putchar
-                jmp .next_y
+                jmp .putchar
             .print_empty:
                 push byte EMPTY
+                jmp .putchar
+            .putchar:
                 call putchar
-            .next_y:
                 inc cx
                 jmp .y
         .end_y:
@@ -213,48 +225,42 @@ detect_position:
     ; If input coord is not empty, do nothing.
     bt [map_enabled+bx], cx
     jc .end
+    
+    push bx
+    push cx
 
+    lea si, [map_enabled+bx]
+    lea di, [map+bx]
+    xor dx, dx
     call change_piece
-    push ax
+    add dx, ax
     call rotate90 ; 90
+    lea si, [map_enabled+bx]
+    lea di, [map+bx]
     call change_piece
-    cmp al, ah
-    pop bx ; must be POPped before jump, or else it caused stack corruption.
-    jz .toggle_player
-    cmp bl, bh
-    jnz .restore
+    
+    pop cx
+    pop bx
+
+    pusha
+    lea si, [map]
+    push get_askew
+    call askew
+    push ax
+    lea si, [map_enabled]
+    push get_askew
+    call askew
+    mov si, ax
+    pop di
+    call count_piece
+    popa
+
+    add dx, ax
+    cmp dx, 2 ; -> 3
+    jz .restore
+
     .toggle_player:
         xor byte [player], 1 ; toggle player
-
-    ; bx, cx has already been defined at rotate90 subroutine.
-    ; lea si, [map]
-    ; call askew
-    ; push ax
-    ; lea si, [map_enabled]
-    ; call askew
-    ; mov si, ax
-    ; pop di
-    ; call count_piece
-    ; xchg bx, bx
-    ; cmp ah, al
-    ; jz .end
-    ; mov cx, ax
-    ; .loop:
-    ;     cmp ch, cl
-    ;     movzx ax, ch
-    ;     jg .end
-    ;     cmp byte [player], 0
-    ;     mov bx, ax
-    ;     jz .set_player2
-    ;     .set_player1:
-    ;         btr [map+bx], ax
-    ;         jmp .next
-    ;     .set_player2:
-    ;         bts [map+bx], ax
-    ;     .next:
-    ;         bts [map_enabled+bx], ax
-    ;         inc ch
-    ;         jmp .loop
     .restore:
         call rotate90 ; 180
         call rotate90 ; 240
@@ -263,8 +269,6 @@ detect_position:
         ret
 
 change_piece:
-    lea si, [map_enabled+bx]
-    lea di, [map+bx]
     call count_piece
 
     ; If no same piece, do nothing.
@@ -303,31 +307,37 @@ count_piece:
     push cx
     push dx
     xor ax, ax
-    push cx
+    mov dh, cl
     .dec_loop:
-        mov ah, cl
         dec cl
         cmp cl, 0
-        jl .restore_cx
+        jl .restore_ah
         bt [si], cx
-        jnc .restore_cx
+        jnc .restore_ah
         bt [di], cx
-        get_cf dx
-        cmp dx, [player]
+        get_cf dl
+        cmp dl, [player]
         jnz .dec_loop
-    .restore_cx:
-        pop cx
+        mov ah, cl
+        jmp .mov_cl_dh
+    .restore_ah:
+        mov ah, dh
+    .mov_cl_dh:
+        mov cl, dh
     .inc_loop:
-        mov al, cl
         inc cl
         cmp cl, MAX_X
-        jge .end
+        jge .restore_ah2
         bt [si], cx
-        jnc .end
+        jnc .restore_ah2
         bt [di], cx
-        get_cf dx
-        cmp dx, [player]
+        get_cf dl
+        cmp dl, [player]
         jnz .inc_loop
+        mov al, cl
+        jmp .end
+    .restore_ah2:
+        mov al, dh
     .end:
         pop dx
         pop cx
