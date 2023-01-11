@@ -114,6 +114,8 @@ rotate90:
                 ret
 
 get_askew:
+    cmp bx, MAX_Y
+    jge .end
     cmp cx, MAX_Y
     jge .end
     bt [si+bx], cx
@@ -167,15 +169,15 @@ print_0d0a:
 draw:
     xor dx, dx
     xor bx, bx
-    ; .title:
-    ;     cmp dx, MAX_X
-    ;     jz .x
-    ;     mov ax, dx
-    ;     add ax, 'a'
-    ;     push ax
-    ;     call putchar
-    ;     inc dx
-    ;     jmp .title
+    .title:
+        cmp dx, MAX_X
+        jz .x
+        mov ax, dx
+        add ax, 'a'
+        push ax
+        call putchar
+        inc dx
+        jmp .title
     .x:
         call print_0d0a
         cmp bx, MAX_X
@@ -222,25 +224,24 @@ detect_position:
     sub bl, '1'
     call print_0d0a
 
-    ; If input coord is not empty, do nothing.
-    bt [map_enabled+bx], cx
-    jc .end
-    
-    push bx
-    push cx
-
     lea si, [map_enabled+bx]
     lea di, [map+bx]
-    xor dx, dx
+
+    ; If input coord is not empty, do nothing.
+    bt [si], cx
+    jc .end
+
     call change_piece
-    add dx, ax
+    mov dx, ax
     call rotate90 ; 90
     lea si, [map_enabled+bx]
     lea di, [map+bx]
     call change_piece
-    
-    pop cx
-    pop bx
+    add dx, ax
+
+    call rotate90 ; 180
+    call rotate90 ; 240
+    call rotate90 ; 360
 
     pusha
     lea si, [map]
@@ -252,19 +253,13 @@ detect_position:
     call askew
     mov si, ax
     pop di
-    call count_piece
+    ; call count_piece
     popa
 
-    add dx, ax
     cmp dx, 2 ; -> 3
-    jz .restore
-
+    jz .end
     .toggle_player:
         xor byte [player], 1 ; toggle player
-    .restore:
-        call rotate90 ; 180
-        call rotate90 ; 240
-        call rotate90 ; 360
     .end:
         ret
 
@@ -283,12 +278,12 @@ change_piece:
         cmp byte [player], 0
         jnz .set_player2
         .set_player1:
-            btr [map+bx], ax
+            btr [di], ax
             jmp .next
         .set_player2:
-            bts [map+bx], ax
+            bts [di], ax
         .next:
-            bts [map_enabled+bx], ax
+            bts [si], ax
             inc ch
             jmp .loop
 
@@ -305,7 +300,6 @@ change_piece:
 count_piece:
     ; cx: x (0-7)
     push cx
-    push dx
     xor ax, ax
     mov dh, cl
     .dec_loop:
@@ -314,10 +308,9 @@ count_piece:
         jl .restore_ah
         bt [si], cx
         jnc .restore_ah
-        bt [di], cx
-        get_cf dl
-        cmp dl, [player]
+        call .aa
         jnz .dec_loop
+        xchg bx, bx
         mov ah, cl
         jmp .mov_cl_dh
     .restore_ah:
@@ -330,17 +323,19 @@ count_piece:
         jge .restore_ah2
         bt [si], cx
         jnc .restore_ah2
-        bt [di], cx
-        get_cf dl
-        cmp dl, [player]
+        call .aa
         jnz .inc_loop
         mov al, cl
         jmp .end
     .restore_ah2:
         mov al, dh
     .end:
-        pop dx
         pop cx
+        ret
+    .aa:
+        bt [di], cx
+        get_cf dl
+        cmp dl, [player]
         ret
 
 wait_key:
