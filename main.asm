@@ -62,12 +62,14 @@ putchar:
     ret 2
 
 rotate90:
+    push dx
     lea si, [map_enabled]
     call ._rotate90
     lea si, [map]
     call ._rotate90
     xchg cx, bx
     abs bx, MAX_X-1
+    pop dx
     ret
 
     ._rotate90:
@@ -113,37 +115,24 @@ rotate90:
                 ; ret 2
                 ret
 
-get_askew:
-    cmp bx, MAX_Y
-    jge .end
-    cmp cx, MAX_Y
-    jge .end
-    bt [si+bx], cx
-    jnc .finally
-    bts di, cx
-    .finally:
-        inc bx
-        inc cx
-        jmp get_askew
-    .end:
-        ret
-
 askew:
-    ; si: First address
+    ; si: map_enabled
+    ; di: map
     ; bx: y
     ; cx: x
-    mov bp, sp
-    pusha
-    xor di, di
+    xor ax, ax
+    xor dx, dx
+    push bx
+    push cx
     .find_start:
         dec bx
-        dec cx
-        cmp bx, 0
-        jz .loop
         jl .set_zero_bx
-        cmp cx, 0
-        jz .loop
+        dec cx
         jl .set_zero_cx
+        test bx, bx
+        jz .loop
+        test cx, cx
+        jz .loop
         jmp .find_start
     .set_zero_bx:
         xor bx, bx
@@ -151,13 +140,25 @@ askew:
     .set_zero_cx:
         xor cx, cx
     .loop:
-        call [bp + 2]
+        cmp bx, MAX_Y
+        jge .end
+        cmp cx, MAX_Y
+        jge .end
+        bt [di+bx], cx
+        jnc .si_check
+        bts dx, cx
+        .si_check:
+            bt [si+bx], cx
+            jnc .next
+            bts ax, cx
+        .next:
+            inc bx
+            inc cx
+            jmp .loop
     .end:
-        mov [bp - 2], di
-        popa
-        mov ax, [bp - 2]
-        ret 2
-
+        pop cx
+        pop bx
+        ret
 
 print_0d0a:
     push NEWLINE_0D
@@ -226,117 +227,99 @@ detect_position:
 
     lea si, [map_enabled+bx]
     lea di, [map+bx]
-
-    ; If input coord is not empty, do nothing.
-    bt [si], cx
-    jc .end
+    xor dx, dx
 
     call change_piece
-    mov dx, ax
-    call rotate90 ; 90
+    call rotate90 ; bx will be changed
     lea si, [map_enabled+bx]
     lea di, [map+bx]
     call change_piece
-    add dx, ax
 
+    ; rotate90 overwrites map_enabled and map.
+    ; That's why it calls rotate90 multiple times.
     call rotate90 ; 180
     call rotate90 ; 240
     call rotate90 ; 360
 
     pusha
-    lea si, [map]
-    push get_askew
-    call askew
-    push ax
     lea si, [map_enabled]
-    push get_askew
+    lea di, [map]
     call askew
-    mov si, ax
-    pop di
-    ; call count_piece
+    xchg si, ax
+    xchg di, dx
+    call count_piece
     popa
 
-    cmp dx, 2 ; -> 3
+    test dx, dx
     jz .end
-    .toggle_player:
-        xor byte [player], 1 ; toggle player
+    xor byte [player], 1 ; toggle player
     .end:
         ret
 
 change_piece:
+    push bx
+    push cx
     call count_piece
-
-    ; If no same piece, do nothing.
-    cmp ah, al
-    jz .do_nothing
-
-    mov cx, ax
     .loop:
-        cmp ch, cl
-        movzx ax, ch
-        jg .changed
+        inc ax
+        cmp ax, bx
+        jge .done
+        mov dx, 1 ; player change flag
         cmp byte [player], 0
         jnz .set_player2
         .set_player1:
             btr [di], ax
+            btr [di], cx
             jmp .next
         .set_player2:
             bts [di], ax
+            bts [di], cx
         .next:
             bts [si], ax
-            inc ch
+            bts [si], cx
             jmp .loop
-
-    .changed:
-        ; This subroutine would be called multiple times.
-        ; If toggling player here, it may be overwritten when called again.
-        xor ax, ax
-        ret
-
-    .do_nothing:
-        mov ax, 1
+    .done:
+        pop cx
+        pop bx
         ret
 
 count_piece:
-    ; cx: x (0-7)
-    push cx
-    xor ax, ax
-    mov dh, cl
-    .dec_loop:
-        dec cl
-        cmp cl, 0
-        jl .restore_ah
-        bt [si], cx
-        jnc .restore_ah
-        call .aa
-        jnz .dec_loop
-        xchg bx, bx
-        mov ah, cl
-        jmp .mov_cl_dh
-    .restore_ah:
-        mov ah, dh
-    .mov_cl_dh:
-        mov cl, dh
-    .inc_loop:
-        inc cl
-        cmp cl, MAX_X
-        jge .restore_ah2
-        bt [si], cx
-        jnc .restore_ah2
-        call .aa
-        jnz .inc_loop
-        mov al, cl
-        jmp .end
-    .restore_ah2:
-        mov al, dh
-    .end:
-        pop cx
-        ret
-    .aa:
-        bt [di], cx
-        get_cf dl
-        cmp dl, [player]
-        ret
+    xor bx, bx
+    call .find
+    push ax
+    mov bx, 1
+    call .find
+    pop bx
+    ret
+    .find:
+        mov ax, cx
+        .loop:
+            test bx, bx
+            jz .inc
+            .dec:
+                dec ax
+                jmp .check_enabled
+            .inc:
+                inc ax
+            .check_enabled:
+                cmp ax, 0
+                jl .end
+                cmp ax, MAX_X
+                jg .end
+                bt [si], ax
+                jnc .end
+            .check:
+                bt [di], ax
+                push dx
+                get_cf dx
+                ; xchg bx, bx
+                cmp dx, [player]
+                pop dx
+                jnz .loop
+                ret
+        .end:
+            mov ax, cx
+            ret
 
 wait_key:
     xor ax, ax
