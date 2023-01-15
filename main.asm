@@ -19,6 +19,10 @@ org 0x7c00
     neg %1
 %endmacro
 
+%macro DEBUG 0
+    xchg bx, bx
+%endmacro
+
 player db 0
 
        ; hgfedcba
@@ -44,38 +48,30 @@ map_enabled db 0b00000000, ; 1
 init:
     mov ax, 3
     int 0x10
-    jmp loop
-
-loop:
-    call draw
-    call detect_position
-    jmp loop
+    .loop:
+        call draw
+        call detect_position
+        jmp .loop
 
 putchar:
-    mov bp, sp
     pusha
-    mov ax, [bp + 2]
     mov ah, 0xe
     xor bx, bx
     int 0x10
     popa
-    ret 2
+    ret
 
 rotate90:
-    push dx
     lea si, [map_enabled]
     call ._rotate90
     lea si, [map]
     call ._rotate90
     xchg cx, bx
     abs bx, MAX_X-1
-    pop dx
     ret
 
     ._rotate90:
-        ; mov bp, sp
         pusha
-        ; mov si, [bp + 2]
         xor cx, cx
         mov ax, si
         .outer_loop:
@@ -112,33 +108,16 @@ rotate90:
                 jmp .loop
             .ret:
                 popa
-                ; ret 2
                 ret
 
 askew:
-    ; si: map_enabled
-    ; di: map
-    ; bx: y
-    ; cx: x
     xor ax, ax
+    xchg ax, bx ; mov bx, 0
+    call detect_position.to_sidi
+    xchg ax, bx
     xor dx, dx
-    push bx
     push cx
-    .find_start:
-        dec bx
-        jl .set_zero_bx
-        dec cx
-        jl .set_zero_cx
-        test bx, bx
-        jz .loop
-        test cx, cx
-        jz .loop
-        jmp .find_start
-    .set_zero_bx:
-        xor bx, bx
-        jmp .loop
-    .set_zero_cx:
-        xor cx, cx
+    call .find_start
     .loop:
         cmp bx, MAX_Y
         jge .end
@@ -157,27 +136,43 @@ askew:
             jmp .loop
     .end:
         pop cx
-        pop bx
+    .ret:
         ret
+    .find_start:
+        dec bx
+        jl .set_zero_bx
+        dec cx
+        jl .set_zero_cx
+        test bx, bx
+        jz .ret
+        test cx, cx
+        jz .ret
+        jmp .find_start
+    .set_zero_bx:
+        xor bx, bx
+        jmp .loop
+    .set_zero_cx:
+        xor cx, cx
+    ret
 
 print_0d0a:
-    push NEWLINE_0D
+    mov al, NEWLINE_0D
     call putchar
-    push NEWLINE_0A
+    mov al, NEWLINE_0A
     call putchar
     ret
 
 draw:
-    xor dx, dx
+    xor ax, ax
     xor bx, bx
     .title:
-        cmp dx, MAX_X
+        cmp ax, MAX_X
         jz .x
-        mov ax, dx
-        add ax, 'a'
         push ax
+        add ax, 'a'
         call putchar
-        inc dx
+        pop ax
+        inc ax
         jmp .title
     .x:
         call print_0d0a
@@ -194,14 +189,13 @@ draw:
             ; check whose piece
             bt [map+bx], cx
             jnc .print_USER1
-            push byte USER2
+            mov al, USER2
             jmp .putchar
             .print_USER1:
-                push byte USER1
+                mov al, USER1
                 jmp .putchar
             .print_empty:
-                push byte EMPTY
-                jmp .putchar
+                mov al, EMPTY
             .putchar:
                 call putchar
                 inc cx
@@ -209,7 +203,7 @@ draw:
         .end_y:
             mov dx, bx
             add dx, '1'
-            push dx
+            mov ax, dx
             call putchar
             inc bx
             jmp .x
@@ -217,6 +211,8 @@ draw:
         ret
 
 detect_position:
+    xor dx, dx ; will be changed at change_piece
+
     call wait_key ; x must be between a and h
     movzx cx, al
     sub cl, 'a'
@@ -225,70 +221,90 @@ detect_position:
     sub bl, '1'
     call print_0d0a
 
-    lea si, [map_enabled+bx]
-    lea di, [map+bx]
-    xor dx, dx
+    push bx
 
-    call change_piece
+    call .change_piece
     call rotate90 ; bx will be changed
-    lea si, [map_enabled+bx]
-    lea di, [map+bx]
-    call change_piece
+    call .change_piece
 
     ; rotate90 overwrites map_enabled and map.
     ; That's why it calls rotate90 multiple times.
     call rotate90 ; 180
     call rotate90 ; 240
     call rotate90 ; 360
+    
+    push dx
 
-    pusha
-    lea si, [map_enabled]
-    lea di, [map]
     call askew
     xchg si, ax
     xchg di, dx
-    call count_piece
-    popa
+    pop dx
+    pop bx
+    push .inc_sidi
+    call change_piece
 
     test dx, dx
     jz .end
+    call .to_sidi
+    mov ax, cx
+    call change_piece.set
     xor byte [player], 1 ; toggle player
     .end:
         ret
+    .inc_sidi:
+        push bx
+        push cx
+        call askew.find_start
+        add bx, ax
+        call .to_sidi
+        pop cx
+        pop bx
+        ret
+    .to_sidi:
+        lea si, [map_enabled+bx]
+        lea di, [map+bx]
+        ret
+    .change_piece:
+        push .to_sidi
+        call .to_sidi
+        mov si, [si]
+        mov di, [di]
+        call change_piece
+        ret
 
 change_piece:
-    push bx
-    push cx
+    mov bp, sp
     call count_piece
     .loop:
         inc ax
-        cmp ax, bx
-        jge .done
-        mov dx, 1 ; player change flag
+        cmp ax, cx
+        jge .ret
+        inc dx ; player change flag
+        call [bp + 2]
+        call .set
+        jmp .loop
+    .ret:
+        ret 2
+    .set:
         cmp byte [player], 0
         jnz .set_player2
         .set_player1:
             btr [di], ax
-            btr [di], cx
             jmp .next
         .set_player2:
             bts [di], ax
-            bts [di], cx
         .next:
             bts [si], ax
-            bts [si], cx
-            jmp .loop
-    .done:
-        pop cx
-        pop bx
         ret
 
 count_piece:
+    push bx
     xor bx, bx
     call .find
     push ax
-    mov bx, 1
+    inc bx
     call .find
+    pop cx
     pop bx
     ret
     .find:
@@ -306,14 +322,13 @@ count_piece:
                 jl .end
                 cmp ax, MAX_X
                 jg .end
-                bt [si], ax
+                bt si, ax
                 jnc .end
             .check:
-                bt [di], ax
+                bt di, ax
                 push dx
                 get_cf dx
-                ; xchg bx, bx
-                cmp dx, [player]
+                cmp dl, [player]
                 pop dx
                 jnz .loop
                 ret
@@ -324,7 +339,6 @@ count_piece:
 wait_key:
     xor ax, ax
     int 0x16
-    push ax
     call putchar
     ret
 
