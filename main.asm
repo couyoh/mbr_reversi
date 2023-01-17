@@ -25,16 +25,6 @@ org 0x7c00
 
 player db 0
 
-       ; hgfedcba
-map db 0b00000000, ; 1
-    db 0b00000000, ; 2
-    db 0b00000000, ; 3
-    db 0b00010000, ; 4
-    db 0b00001000, ; 5
-    db 0b00000000, ; 6
-    db 0b00000000, ; 7
-    db 0b00000000  ; 8
-
                ; hgfedcba
 map_enabled db 0b00000000, ; 1
             db 0b00000000, ; 2
@@ -45,12 +35,23 @@ map_enabled db 0b00000000, ; 1
             db 0b00000000, ; 7
             db 0b00000000  ; 8
 
+       ; hgfedcba
+map db 0b00000000, ; 1
+    db 0b00000000, ; 2
+    db 0b00000000, ; 3
+    db 0b00010000, ; 4
+    db 0b00001000, ; 5
+    db 0b00000000, ; 6
+    db 0b00000000, ; 7
+    db 0b00000000  ; 8
+
+
 init:
     mov ax, 3
     int 0x10
     .loop:
         call draw
-        call detect_position
+        call main
         jmp .loop
 
 putchar:
@@ -64,7 +65,7 @@ putchar:
 rotate90:
     lea si, [map_enabled]
     call ._rotate90
-    lea si, [map]
+    lea si, [si+8]
     call ._rotate90
     xchg cx, bx
     abs bx, MAX_X-1
@@ -73,59 +74,53 @@ rotate90:
     ._rotate90:
         pusha
         xor cx, cx
-        mov ax, si
         .outer_loop:
             cmp cx, MAX_X
             jz .end
 
-            xor dx, dx
-            xor di, di
+            xor ax, ax
+            xor bx, bx
             .inner_loop:
-                cmp dx, MAX_Y
+                cmp bx, MAX_Y
                 jz .outer_next
-                bt [si], cx
+                bt [si+bx], cx
                 jnc .finally
-                bts di, dx
+                bts ax, bx
                 .finally:
-                    inc dx
-                    inc si
+                    inc bx
                     jmp .inner_loop
 
             .outer_next:
-                mov si, ax
-                push di
+                push ax
                 inc cx
                 jmp .outer_loop
         .end:
-            xor cx, cx
+            xor bx, bx
             .loop:
-                cmp cx, MAX_Y
+                cmp bx, MAX_Y
                 jz .ret
                 pop ax
-                mov [si], al
-                inc si
-                inc cx
+                mov [si+bx], al
+                inc bx
                 jmp .loop
             .ret:
                 popa
                 ret
 
 askew:
-    xor ax, ax
-    xchg ax, bx ; mov bx, 0
-    call detect_position.to_sidi
-    xchg ax, bx
-    xor dx, dx
     push cx
-    call .find_start
+    lea si, [map_enabled]
+    call ax
+    xor ax, ax
+    xor di, di
     .loop:
         cmp bx, MAX_Y
         jge .end
         cmp cx, MAX_Y
         jge .end
-        bt [di+bx], cx
+        bt [si+bx+8], cx
         jnc .si_check
-        bts dx, cx
+        bts di, cx
         .si_check:
             bt [si+bx], cx
             jnc .next
@@ -139,21 +134,19 @@ askew:
     .ret:
         ret
     .find_start:
-        dec bx
-        jl .set_zero_bx
-        dec cx
-        jl .set_zero_cx
-        test bx, bx
-        jz .ret
-        test cx, cx
-        jz .ret
-        jmp .find_start
-    .set_zero_bx:
-        xor bx, bx
-        jmp .loop
-    .set_zero_cx:
-        xor cx, cx
-    ret
+        sub bx, cx
+        jc .set_cx
+        mov cx, di
+        ret
+        .set_cx:
+            sub cx, bx
+            mov bx, di
+            ret
+    .plus:
+        abs cx, 7
+        mov di, 7
+        call .find_start
+        ret
 
 print_0d0a:
     mov al, NEWLINE_0D
@@ -187,7 +180,7 @@ draw:
             jnc .print_empty
 
             ; check whose piece
-            bt [map+bx], cx
+            bt [map_enabled+bx+8], cx
             jnc .print_USER1
             mov al, USER2
             jmp .putchar
@@ -210,9 +203,7 @@ draw:
     .end_x:
         ret
 
-detect_position:
-    xor dx, dx ; will be changed at change_piece
-
+main:
     call wait_key ; x must be between a and h
     movzx cx, al
     sub cl, 'a'
@@ -221,10 +212,9 @@ detect_position:
     sub bl, '1'
     call print_0d0a
 
-    push bx
-
+    xor dx, dx ; will be changed at change_piece
     call .change_piece
-    call rotate90 ; bx will be changed
+    call rotate90
     call .change_piece
 
     ; rotate90 overwrites map_enabled and map.
@@ -232,21 +222,28 @@ detect_position:
     call rotate90 ; 180
     call rotate90 ; 240
     call rotate90 ; 360
-    
-    push dx
 
+    push bx
+    xor di, di
+    mov ax, askew.find_start
     call askew
     xchg si, ax
-    xchg di, dx
-    pop dx
     pop bx
     push .inc_sidi
     call change_piece
 
+    push bx
+    mov ax, askew.plus
+    call askew
+    xchg si, ax
+    pop bx
+    ; push .inc_sidi
+    ; call change_piece
+
     test dx, dx
     jz .end
-    call .to_sidi
-    mov ax, cx
+    call .make_sidi
+    xchg ax, cx
     call change_piece.set
     xor byte [player], 1 ; toggle player
     .end:
@@ -254,21 +251,22 @@ detect_position:
     .inc_sidi:
         push bx
         push cx
+        xor di, di
         call askew.find_start
         add bx, ax
-        call .to_sidi
+        call .make_sidi
         pop cx
         pop bx
         ret
-    .to_sidi:
+    .make_sidi:
         lea si, [map_enabled+bx]
-        lea di, [map+bx]
+        lea di, [si+8]
         ret
     .change_piece:
-        push .to_sidi
-        call .to_sidi
+        call .make_sidi
         mov si, [si]
         mov di, [di]
+        push .make_sidi
         call change_piece
         ret
 
