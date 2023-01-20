@@ -108,11 +108,8 @@ rotate90:
                 ret
 
 askew:
-    push cx
     lea si, [map_enabled]
-    call ax
     xor ax, ax
-    xor di, di
     .loop:
         cmp bx, MAX_Y
         jge .end
@@ -120,18 +117,27 @@ askew:
         jge .end
         bt [si+bx+8], cx
         jnc .si_check
-        bts di, cx
+        bts ax, cx
         .si_check:
             bt [si+bx], cx
             jnc .next
+            xchg al, ah
             bts ax, cx
+            xchg ah, al
         .next:
             inc bx
-            inc cx
+            call di
+            js .end
             jmp .loop
+        .inc:
+            inc cx
+            ret
+        .dec:
+            dec cx
+            ret
     .end:
-        pop cx
-    .ret:
+        movzx si, ah
+        movzx di, al
         ret
     .find_start:
         sub bx, cx
@@ -158,15 +164,15 @@ print_0d0a:
 draw:
     xor ax, ax
     xor bx, bx
-    .title:
-        cmp ax, MAX_X
-        jz .x
-        push ax
-        add ax, 'a'
-        call putchar
-        pop ax
-        inc ax
-        jmp .title
+    ; .title:
+    ;     cmp ax, MAX_X
+    ;     jz .x
+    ;     push ax
+    ;     add ax, 'a'
+    ;     call putchar
+    ;     pop ax
+    ;     inc ax
+    ;     jmp .title
     .x:
         call print_0d0a
         cmp bx, MAX_X
@@ -223,20 +229,24 @@ main:
     call rotate90 ; 240
     call rotate90 ; 360
 
-    push bx
     xor di, di
-    mov ax, askew.find_start
+    push bx
+    push cx
+    call askew.find_start
+    mov di, askew.inc
     call askew
-    xchg si, ax
+    pop cx
     pop bx
     push .inc_sidi
     call change_piece
 
-    push bx
-    mov ax, askew.plus
-    call askew
-    xchg si, ax
-    pop bx
+    ; push bx
+    ; push cx
+    ; call askew.plus
+    ; mov di, askew.dec
+    ; call askew
+    ; pop cx
+    ; pop bx
     ; push .inc_sidi
     ; call change_piece
 
@@ -272,7 +282,45 @@ main:
 
 change_piece:
     mov bp, sp
-    call count_piece
+
+    .count_piece:
+        push bx
+        xor bx, bx
+        call .find
+        push ax
+        inc bx
+        call .find
+        pop cx
+        pop bx
+        jmp .loop
+        .find:
+            mov ax, cx
+            .count_loop:
+                test bx, bx
+                jz .inc
+                .dec:
+                    dec ax
+                    jmp .check_enabled
+                .inc:
+                    inc ax
+                .check_enabled:
+                    cmp ax, 0
+                    jl .end
+                    cmp ax, MAX_X
+                    jg .end
+                    bt si, ax
+                    jnc .end
+                .check:
+                    bt di, ax
+                    push dx
+                    get_cf dx
+                    cmp dl, [player]
+                    pop dx
+                    jnz .count_loop
+                    ret
+            .end:
+                mov ax, cx
+                ret
     .loop:
         inc ax
         cmp ax, cx
@@ -294,45 +342,6 @@ change_piece:
         .next:
             bts [si], ax
         ret
-
-count_piece:
-    push bx
-    xor bx, bx
-    call .find
-    push ax
-    inc bx
-    call .find
-    pop cx
-    pop bx
-    ret
-    .find:
-        mov ax, cx
-        .loop:
-            test bx, bx
-            jz .inc
-            .dec:
-                dec ax
-                jmp .check_enabled
-            .inc:
-                inc ax
-            .check_enabled:
-                cmp ax, 0
-                jl .end
-                cmp ax, MAX_X
-                jg .end
-                bt si, ax
-                jnc .end
-            .check:
-                bt di, ax
-                push dx
-                get_cf dx
-                cmp dl, [player]
-                pop dx
-                jnz .loop
-                ret
-        .end:
-            mov ax, cx
-            ret
 
 wait_key:
     xor ax, ax
