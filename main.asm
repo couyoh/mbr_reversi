@@ -23,7 +23,7 @@ org 0x7c00
     xchg bx, bx
 %endmacro
 
-player db 0
+player db 1
 
                ; hgfedcba
 map_enabled db 0b00000000, ; 1
@@ -31,7 +31,7 @@ map_enabled db 0b00000000, ; 1
             db 0b00000000, ; 3
             db 0b00011000, ; 4
             db 0b00011000, ; 5
-            db 0b00000000, ; 6
+            db 0b00001000, ; 6
             db 0b00000000, ; 7
             db 0b00000000  ; 8
 
@@ -40,7 +40,7 @@ map db 0b00000000, ; 1
     db 0b00000000, ; 2
     db 0b00000000, ; 3
     db 0b00010000, ; 4
-    db 0b00001000, ; 5
+    db 0b00000000, ; 5
     db 0b00000000, ; 6
     db 0b00000000, ; 7
     db 0b00000000  ; 8
@@ -54,18 +54,10 @@ init:
         call main
         jmp .loop
 
-putchar:
-    pusha
-    mov ah, 0xe
-    xor bx, bx
-    int 0x10
-    popa
-    ret
-
 rotate90:
     lea si, [map_enabled]
     call ._rotate90
-    lea si, [si+8]
+    lea si, [map_enabled+8]
     call ._rotate90
     xchg cx, bx
     abs bx, MAX_X-1
@@ -106,7 +98,6 @@ rotate90:
             .ret:
                 popa
                 ret
-
 askew:
     lea si, [map_enabled]
     xor ax, ax
@@ -164,15 +155,15 @@ print_0d0a:
 draw:
     xor ax, ax
     xor bx, bx
-    ; .title:
-    ;     cmp ax, MAX_X
-    ;     jz .x
-    ;     push ax
-    ;     add ax, 'a'
-    ;     call putchar
-    ;     pop ax
-    ;     inc ax
-    ;     jmp .title
+    .title:
+        cmp ax, MAX_X
+        jz .x
+        push ax
+        add ax, 'a'
+        call putchar
+        pop ax
+        inc ax
+        jmp .title
     .x:
         call print_0d0a
         cmp bx, MAX_X
@@ -181,11 +172,11 @@ draw:
         .y:
             cmp cl, MAX_Y
             jz .end_y
-            ; check whether the piece is placed
+            ; check whether the stone is placed
             bt [map_enabled+bx], cx
             jnc .print_empty
 
-            ; check whose piece
+            ; check whose stone
             bt [map_enabled+bx+8], cx
             jnc .print_USER1
             mov al, USER2
@@ -218,10 +209,11 @@ main:
     sub bl, '1'
     call print_0d0a
 
-    xor dx, dx ; will be changed at change_piece
-    call .change_piece
+    xor dx, dx
+    call .change_stone
+
     call rotate90
-    call .change_piece
+    call .change_stone
 
     ; rotate90 overwrites map_enabled and map.
     ; That's why it calls rotate90 multiple times.
@@ -238,26 +230,27 @@ main:
     pop cx
     pop bx
     push .inc_sidi
-    call change_piece
+    call change_stone
 
-    ; push bx
-    ; push cx
-    ; call askew.plus
-    ; mov di, askew.dec
-    ; call askew
-    ; pop cx
-    ; pop bx
-    ; push .inc_sidi
-    ; call change_piece
+    push bx
+    push cx
+    call askew.plus
+    mov di, askew.dec
+    call askew
+    pop cx
+    pop bx
+    push .inc_sidi
+    call change_stone
 
-    test dx, dx
-    jz .end
-    call .make_sidi
-    xchg ax, cx
-    call change_piece.set
-    xor byte [player], 1 ; toggle player
+    ; Toggle player if the stone has enabled.
+    mov si, [map_enabled+bx]
+    bt si, cx
+    jnc .end
+    xor byte [player], 1
+
     .end:
         ret
+
     .inc_sidi:
         push bx
         push cx
@@ -272,66 +265,43 @@ main:
         lea si, [map_enabled+bx]
         lea di, [si+8]
         ret
-    .change_piece:
+    .change_stone:
+        ;;;;;;;;;;
         call .make_sidi
         mov si, [si]
         mov di, [di]
+        ; ----------
+        ; mov si, [map_enabled+bx]
+        ; mov di, [map_enabled+bx+8]
+        ;;;;;;;;;;
         push .make_sidi
-        call change_piece
+        call change_stone
         ret
 
-change_piece:
+; bx: [in] myself y
+; cx: [in] myself x
+; dh: [var]
+; dl: [var]
+change_stone:
     mov bp, sp
+    .count_stone:
+        xor dl, dl
+        call find
+        dec al
+        mov dh, al
 
-    .count_piece:
-        push bx
-        xor bx, bx
-        call .find
-        push ax
-        inc bx
-        call .find
-        pop cx
-        pop bx
-        jmp .loop
-        .find:
-            mov ax, cx
-            .count_loop:
-                test bx, bx
-                jz .inc
-                .dec:
-                    dec ax
-                    jmp .check_enabled
-                .inc:
-                    inc ax
-                .check_enabled:
-                    cmp ax, 0
-                    jl .end
-                    cmp ax, MAX_X
-                    jg .end
-                    bt si, ax
-                    jnc .end
-                .check:
-                    bt di, ax
-                    push dx
-                    get_cf dx
-                    cmp dl, [player]
-                    pop dx
-                    jnz .count_loop
-                    ret
-            .end:
-                mov ax, cx
-                ret
+        inc dl
+        call find
+        inc al
+
+        cmp al, dh
+        je .ret
+
+        call [bp + 2] ; inc_sidi, make_sidi
+
     .loop:
-        inc ax
-        cmp ax, cx
-        jge .ret
-        inc dx ; player change flag
-        call [bp + 2]
-        call .set
-        jmp .loop
-    .ret:
-        ret 2
-    .set:
+        cmp al, dh
+        jg .ret
         cmp byte [player], 0
         jnz .set_player2
         .set_player1:
@@ -341,12 +311,58 @@ change_piece:
             bts [di], ax
         .next:
             bts [si], ax
+        inc al
+        jmp .loop
+    .ret:
+        ret 2
+
+; dl: [in] Increment if 0, otherwise Decrement
+; cx: [in] myself x
+; si: [in] map_enabled
+; di: [in] map
+; ax: [out] return
+find:
+    mov ax, cx
+    .count_loop:
+        test dl, dl
+        jz .inc
+        .dec:
+            DEBUG ; BUG: e6
+            dec ax
+            jmp .check_enabled
+        .inc:
+            inc ax
+        .check_enabled:
+            cmp ax, 0
+            jl .restore
+            cmp ax, MAX_X
+            jg .restore
+            bt si, ax
+            jnc .restore
+        .check:
+            bt di, ax
+            push dx
+            get_cf dl
+            cmp dl, byte [player]
+            pop dx
+            jnz .count_loop
+            ret
+    .restore:
+        mov ax, cx
         ret
 
 wait_key:
     xor ax, ax
     int 0x16
     call putchar
+    ret
+
+putchar:
+    pusha
+    mov ah, 0xe
+    xor bx, bx
+    int 0x10
+    popa
     ret
 
 times 510-($-$$) db 0
