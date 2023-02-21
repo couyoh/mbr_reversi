@@ -23,7 +23,7 @@ org 0x7c00
     xchg bx, bx
 %endmacro
 
-player db 1
+player db 0
 
                ; hgfedcba
 map_enabled db 0b00000000, ; 1
@@ -31,7 +31,7 @@ map_enabled db 0b00000000, ; 1
             db 0b00000000, ; 3
             db 0b00011000, ; 4
             db 0b00011000, ; 5
-            db 0b00001000, ; 6
+            db 0b00011000, ; 6
             db 0b00000000, ; 7
             db 0b00000000  ; 8
 
@@ -40,8 +40,8 @@ map db 0b00000000, ; 1
     db 0b00000000, ; 2
     db 0b00000000, ; 3
     db 0b00010000, ; 4
-    db 0b00000000, ; 5
-    db 0b00000000, ; 6
+    db 0b00010000, ; 5
+    db 0b00010000, ; 6
     db 0b00000000, ; 7
     db 0b00000000  ; 8
 
@@ -287,12 +287,10 @@ change_stone:
     .count_stone:
         xor dl, dl
         call find
-        dec al
         mov dh, al
 
         inc dl
         call find
-        inc al
 
         cmp al, dh
         je .ret
@@ -327,7 +325,7 @@ find:
         test dl, dl
         jz .inc
         .dec:
-            DEBUG ; BUG: e6
+            DEBUG ; BUG: f6
             dec ax
             jmp .check_enabled
         .inc:
@@ -346,6 +344,13 @@ find:
             cmp dl, byte [player]
             pop dx
             jnz .count_loop
+            test dl, dl
+            jz ._dec
+            inc ax
+            jmp .ret
+            ._dec:
+            dec ax
+            .ret:
             ret
     .restore:
         mov ax, cx
