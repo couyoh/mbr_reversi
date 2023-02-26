@@ -50,14 +50,55 @@ init:
     mov ax, 3
     int 0x10
     .loop:
-        call draw
+        .draw:
+            mov ax, 'a'
+            xor bx, bx
+            .title:
+                cmp ax, 'a'+MAX_X
+                jz .x
+                call putchar
+                inc ax
+                jmp .title
+            .x:
+                call print_0d0a
+                cmp bx, MAX_X
+                jz .main
+                xor cx, cx
+                .y:
+                    cmp cl, MAX_Y
+                    jz .end_y
+                    ; check whether the stone is placed
+                    bt [map_enabled+bx], cx
+                    jnc .print_empty
+
+                    ; check whose stone
+                    bt [map_enabled+bx+8], cx
+                    jnc .print_USER1
+                    mov al, USER2
+                    jmp .putchar
+                    .print_USER1:
+                        mov al, USER1
+                        jmp .putchar
+                    .print_empty:
+                        mov al, EMPTY
+                    .putchar:
+                        call putchar
+                        inc cx
+                        jmp .y
+                .end_y:
+                    mov ax, bx
+                    add al, '1'
+                    call putchar
+                    inc bx
+                    jmp .x
+    .main:
         call main
         jmp .loop
 
 rotate90:
     lea si, [map_enabled]
     call ._rotate90
-    lea si, [map_enabled+8]
+    add si, 8
     call ._rotate90
     xchg cx, bx
     abs bx, MAX_X-1
@@ -152,53 +193,6 @@ print_0d0a:
     call putchar
     ret
 
-draw:
-    xor ax, ax
-    xor bx, bx
-    .title:
-        cmp ax, MAX_X
-        jz .x
-        push ax
-        add ax, 'a'
-        call putchar
-        pop ax
-        inc ax
-        jmp .title
-    .x:
-        call print_0d0a
-        cmp bx, MAX_X
-        jz .end_x
-        xor cx, cx
-        .y:
-            cmp cl, MAX_Y
-            jz .end_y
-            ; check whether the stone is placed
-            bt [map_enabled+bx], cx
-            jnc .print_empty
-
-            ; check whose stone
-            bt [map_enabled+bx+8], cx
-            jnc .print_USER1
-            mov al, USER2
-            jmp .putchar
-            .print_USER1:
-                mov al, USER1
-                jmp .putchar
-            .print_empty:
-                mov al, EMPTY
-            .putchar:
-                call putchar
-                inc cx
-                jmp .y
-        .end_y:
-            mov dx, bx
-            add dx, '1'
-            mov ax, dx
-            call putchar
-            inc bx
-            jmp .x
-    .end_x:
-        ret
 
 main:
     call wait_key ; x must be between a and h
@@ -210,10 +204,10 @@ main:
     call print_0d0a
 
     xor dx, dx
-    call .change_stone
+    call .find_and_change
 
     call rotate90
-    call .change_stone
+    call .find_and_change
 
     ; rotate90 overwrites map_enabled and map.
     ; That's why it calls rotate90 multiple times.
@@ -227,20 +221,21 @@ main:
     call askew.find_start
     mov di, askew.inc
     call askew
+    ; DEBUG
     pop cx
     pop bx
     push .inc_sidi
-    call change_stone
+    call find_and_change
 
     push bx
     push cx
-    call askew.plus
+    call askew.plus ; storange
     mov di, askew.dec
     call askew
     pop cx
     pop bx
     push .inc_sidi
-    call change_stone
+    call find_and_change
 
     ; Toggle player if the stone has enabled.
     mov si, [map_enabled+bx]
@@ -265,24 +260,19 @@ main:
         lea si, [map_enabled+bx]
         lea di, [si+8]
         ret
-    .change_stone:
-        ;;;;;;;;;;
+    .find_and_change:
         call .make_sidi
-        mov si, [si]
-        mov di, [di]
-        ; ----------
-        ; mov si, [map_enabled+bx]
-        ; mov di, [map_enabled+bx+8]
-        ;;;;;;;;;;
+        mov si, [si] ; map_enabled+bx
+        mov di, [di] ; map_enabled+bx+8
         push .make_sidi
-        call change_stone
+        call find_and_change
         ret
 
 ; bx: [in] myself y
 ; cx: [in] myself x
 ; dh: [var]
 ; dl: [var]
-change_stone:
+find_and_change:
     mov bp, sp
     .count_stone:
         xor dl, dl
@@ -292,10 +282,11 @@ change_stone:
         inc dl
         call find
 
+        ; DEBUG ; BUG: f6 at 227
         cmp al, dh
         je .ret
 
-        call [bp + 2] ; inc_sidi, make_sidi
+        call [bp + 2] ; inc_sidi
 
     .loop:
         cmp al, dh
@@ -325,7 +316,6 @@ find:
         test dl, dl
         jz .inc
         .dec:
-            DEBUG ; BUG: f6
             dec ax
             jmp .check_enabled
         .inc:
@@ -344,14 +334,15 @@ find:
             cmp dl, byte [player]
             pop dx
             jnz .count_loop
+
             test dl, dl
             jz ._dec
             inc ax
             jmp .ret
             ._dec:
-            dec ax
+                dec ax
             .ret:
-            ret
+                ret
     .restore:
         mov ax, cx
         ret
