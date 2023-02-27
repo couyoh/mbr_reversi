@@ -30,9 +30,9 @@ map_enabled db 0b00000000, ; 1
             db 0b00000000, ; 2
             db 0b00000000, ; 3
             db 0b00011000, ; 4
-            db 0b00011000, ; 5
-            db 0b00011000, ; 6
-            db 0b00000000, ; 7
+            db 0b00011110, ; 5
+            db 0b00010000, ; 6
+            db 0b00100000, ; 7
             db 0b00000000  ; 8
 
        ; hgfedcba
@@ -40,8 +40,8 @@ map db 0b00000000, ; 1
     db 0b00000000, ; 2
     db 0b00000000, ; 3
     db 0b00010000, ; 4
-    db 0b00010000, ; 5
-    db 0b00010000, ; 6
+    db 0b00011110, ; 5
+    db 0b00000000, ; 6
     db 0b00000000, ; 7
     db 0b00000000  ; 8
 
@@ -181,6 +181,7 @@ askew:
             mov bx, di
             ret
     .plus:
+        DEBUG ; BUG: b6
         abs cx, 7
         mov di, 7
         call .find_start
@@ -221,7 +222,6 @@ main:
     call askew.find_start
     mov di, askew.inc
     call askew
-    ; DEBUG
     pop cx
     pop bx
     push .inc_sidi
@@ -229,7 +229,7 @@ main:
 
     push bx
     push cx
-    call askew.plus ; storange
+    call askew.plus
     mov di, askew.dec
     call askew
     pop cx
@@ -282,13 +282,12 @@ find_and_change:
         inc dl
         call find
 
-        ; DEBUG ; BUG: f6 at 227
         cmp al, dh
         je .ret
 
-        call [bp + 2] ; inc_sidi
 
     .loop:
+        call [bp + 2] ; inc_sidi
         cmp al, dh
         jg .ret
         cmp byte [player], 0
