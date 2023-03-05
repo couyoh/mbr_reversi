@@ -140,27 +140,30 @@ rotate90:
                 popa
                 ret
 askew:
+    push bx
+    push cx
+    call .find_start
     lea si, [map_enabled]
     xor ax, ax
-    .loop:
+    .map_bitcheck:
         cmp bx, MAX_Y
         jge .end
-        cmp cx, MAX_Y
+        cmp cx, MAX_X
         jge .end
-        bt [si+bx+8], cx
-        jnc .si_check
-        bts ax, cx
-        .si_check:
+        bt [si+bx+MAX_Y], cx
+        jnc .map_enabled_bitcheck
+        bts ax, cx ; al = map
+        .map_enabled_bitcheck:
             bt [si+bx], cx
             jnc .next
             xchg al, ah
-            bts ax, cx
+            bts ax, cx ; ah = map_enabled
             xchg ah, al
         .next:
             inc bx
             call di
-            js .end
-            jmp .loop
+            js .end ; jump if .dec's retval < 0
+            jmp .map_bitcheck
         .inc:
             inc cx
             ret
@@ -170,22 +173,19 @@ askew:
     .end:
         movzx si, ah
         movzx di, al
+        pop cx
+        pop bx
         ret
     .find_start:
         sub bx, cx
         jc .set_cx
-        mov cx, di
+        xor cx, cx
         ret
         .set_cx:
-            sub cx, bx
-            mov bx, di
+            add bx, MAX_X-1
+            mov cx, bx
+            xor bx, bx
             ret
-    .plus:
-        DEBUG ; BUG: b6
-        abs cx, 7
-        mov di, 7
-        call .find_start
-        ret
 
 print_0d0a:
     mov al, NEWLINE_0D
@@ -216,25 +216,20 @@ main:
     call rotate90 ; 240
     call rotate90 ; 360
 
-    xor di, di
-    push bx
-    push cx
-    call askew.find_start
+    ; inverse
     mov di, askew.inc
     call askew
-    pop cx
-    pop bx
+    xor di, di
     push .inc_sidi
     call find_and_change
 
-    push bx
+    ; direct
     push cx
-    call askew.plus
+    abs cx, 7
     mov di, askew.dec
     call askew
     pop cx
-    pop bx
-    push .inc_sidi
+    push .inc_sidi_decdi
     call find_and_change
 
     ; Toggle player if the stone has enabled.
@@ -246,10 +241,11 @@ main:
     .end:
         ret
 
+    .inc_sidi_decdi:
+        mov di, askew.dec
     .inc_sidi:
         push bx
         push cx
-        xor di, di
         call askew.find_start
         add bx, ax
         call .make_sidi
